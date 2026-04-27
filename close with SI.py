@@ -269,17 +269,29 @@ def train_transformer(df, features, window):
     data_X = scaler_X.fit_transform(df[features])
     data_y = scaler_y.fit_transform(df[[Config.TARGET_COL]])
 
-    train_size = int(len(data_X) * 0.8)
-    train_X, test_X = data_X[:train_size], data_X[train_size:]
-    train_y, test_y = data_y[:train_size], data_y[train_size:]
+    total_len = len(data_X)
+
+    # 按照 70% 训练集, 10% 验证集, 20% 测试集 划分
+    train_size = int(total_len * 0.7)
+    val_size = int(total_len * 0.1)
+
+    train_X = data_X[:train_size]
+    val_X = data_X[train_size: train_size + val_size]
+    test_X = data_X[train_size + val_size:]
+
+    train_y = data_y[:train_size]
+    val_y = data_y[train_size: train_size + val_size]
+    test_y = data_y[train_size + val_size:]
 
     train_ds = TimeSeriesDataset(train_X, train_y, window)
+    val_ds = TimeSeriesDataset(val_X, val_y, window)
     test_ds = TimeSeriesDataset(test_X, test_y, window)
 
     if len(train_ds) == 0 or len(test_ds) == 0:
         return np.nan, np.nan
 
     train_loader = DataLoader(train_ds, batch_size=Config.BATCH_SIZE, shuffle=False)
+    val_loader = DataLoader(val_ds, batch_size=Config.BATCH_SIZE, shuffle=False)
     test_loader = DataLoader(test_ds, batch_size=Config.BATCH_SIZE, shuffle=False)
 
     model = TransformerModel(len(features)).to(Config.DEVICE)
@@ -309,13 +321,13 @@ def train_transformer(df, features, window):
         model.eval()
         val_loss = 0.0
         with torch.no_grad():
-            for X_batch, y_batch in test_loader:
+            for X_batch, y_batch in val_loader:
                 X_batch, y_batch = X_batch.to(Config.DEVICE), y_batch.to(Config.DEVICE)
                 pred = model(X_batch)
                 loss = criterion(pred.squeeze(), y_batch.squeeze())
                 val_loss += loss.item()
 
-        avg_val_loss = val_loss / len(test_loader)
+        avg_val_loss = val_loss / len(val_loader) if len(val_loader) > 0 else 0
         scheduler.step(avg_val_loss)
         early_stopping(avg_val_loss, model)
 
